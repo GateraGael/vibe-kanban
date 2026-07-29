@@ -29,6 +29,7 @@ pub mod search;
 pub mod sessions;
 pub mod ssh_session;
 pub mod tags;
+pub mod task_packets;
 pub mod terminal;
 pub mod webrtc;
 pub mod workspaces;
@@ -41,6 +42,7 @@ pub fn router(deployment: DeploymentImpl) -> IntoMakeService<Router> {
         .merge(workspaces::router(&deployment))
         .merge(execution_processes::router(&deployment))
         .merge(tags::router(&deployment))
+        .merge(task_packets::router(&deployment))
         .merge(oauth::router())
         .merge(organizations::router())
         .merge(filesystem::router())
