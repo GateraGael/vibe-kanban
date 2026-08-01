@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "integration-ledger.schema.json",
+  "title": "Task Packet Protocol integration ledger",
+  "description": "Compact parent-task state for portable parallel ownership, dependencies, and gates.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "status",
+    "subtasks",
+    "write_owners",
+    "contracts",
+    "blocked",
+    "integration_checks",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["planned", "running", "blocked", "integrating", "complete", "failed"]
+    },
+    "subtasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["packet_id", "task_id", "status", "write_scope"],
+        "properties": {
+          "packet_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": ["planned", "running", "blocked", "complete", "failed"]
+          },
+          "execution": {
+            "oneOf": [
+              {
+                "$ref": "execution-provenance.schema.json"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "write_scope": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/resource"
+            }
+          },
+          "result_locator": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "write_owners": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resource", "packet_id"],
+        "properties": {
+          "resource": {
+            "$ref": "#/$defs/resource"
+          },
+          "packet_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["planned", "running", "blocked", "ready", "invalid"]
+      }
+    },
+    "blocked": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["consumer", "waiting_for", "reason"],
+        "properties": {
+          "consumer": {
+            "type": "string",
+            "minLength": 1
+          },
+          "waiting_for": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "integration_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "passed", "failed", "blocked"]
+          },
+          "evidence": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "path"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

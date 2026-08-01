@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "adapter_id": "example.command-agent",
+  "adapter_kind": "agent",
+  "display_name": "Example command-line coding agent",
+  "version": "1.0.0",
+  "protocol_versions": [
+    1
+  ],
+  "capabilities": [
+    "read_files",
+    "write_files",
+    "shell",
+    "structured_output"
+  ],
+  "configuration": {
+    "command": "example-agent",
+    "packet_transport": "stdin-json",
+    "result_transport": "stdout-json"
+  },
+  "metadata": {
+    "model_provider": "selected-at-runtime",
+    "model": "selected-at-runtime"
+  }
+}

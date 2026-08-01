@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "context-slice.schema.json",
+  "title": "Task Packet Protocol context slice",
+  "description": "A bounded, provider-neutral collection of context sources and constraints.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "summary",
+    "authority",
+    "estimated_tokens",
+    "required",
+    "optional",
+    "constraints"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authority": {
+      "type": "string",
+      "enum": ["current", "draft", "legacy"]
+    },
+    "estimated_tokens": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "required": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "optional": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "constraints": {
+      "$ref": "#/$defs/stringList"
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "locator"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "file",
+            "symbol",
+            "heading",
+            "instruction",
+            "contract",
+            "artifact",
+            "url",
+            "database"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "symbols": {
+          "$ref": "#/$defs/stringList"
+        },
+        "headings": {
+          "$ref": "#/$defs/stringList"
+        },
+        "load_when": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-fA-F0-9]{64}$"
+        }
+      }
+    },
+    "stringList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

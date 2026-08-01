@@ -30,6 +30,14 @@ export type CreateTag = { tag_name: string, content: string, };
 
 export type UpdateTag = { tag_name: string | null, content: string | null, };
 
+export type CreateTaskPacket = { issue_id: string | null, workspace_id: string | null, execution_process_id: string | null, packet: unknown, };
+
+export type CreateTaskPacketResult = { execution_process_id: string | null, result: unknown, };
+
+export type TaskPacket = { id: string, packet_id: string, task_id: string, issue_id: string | null, workspace_id: string | null, execution_process_id: string | null, schema_version: bigint, payload_sha256: string, packet: unknown, created_at: string, updated_at: string, };
+
+export type TaskPacketResult = { id: string, task_packet_id: string, execution_process_id: string | null, schema_version: bigint, status: string, payload_sha256: string, result: unknown, created_at: string, updated_at: string, };
+
 export type DraftFollowUpData = { message: string, executor_config: ExecutorConfig, };
 
 export type DraftWorkspaceData = { message: string, repos: Array<DraftWorkspaceRepo>, executor_config: ExecutorConfig | null, linked_issue: DraftWorkspaceLinkedIssue | null, attachments: Array<DraftWorkspaceAttachment>, };
@@ -411,6 +419,8 @@ export type PullRequestDetail = { number: bigint, url: string, status: MergeStat
 export type GitRemote = { name: string, url: string, };
 
 export type ListPrsError = { "type": "cli_not_installed", provider: ProviderKind, } | { "type": "auth_failed", message: string, } | { "type": "unsupported_provider" };
+
+export type TaskPacketAdapterManifest = { schema_version: bigint, adapter_id: string, adapter_kind: string, display_name: string, version: string, protocol_versions: Array<bigint>, capabilities: Array<string>, configuration: unknown, metadata: unknown | null, };
 
 export type LinkPrToIssueRequest = { pr_url: string, pr_number: number, base_branch: string, };
 

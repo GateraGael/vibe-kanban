@@ -2,6 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{FromRow, SqlitePool};
+use task_packet_protocol::{
+    ProtocolError, document_sha256, validate_result_envelope as validate_result_schema,
+    validate_task_packet as validate_task_packet_schema,
+};
 use thiserror::Error;
 use ts_rs::TS;
 use uuid::Uuid;
@@ -14,6 +18,8 @@ pub enum TaskPacketError {
     Database(#[from] sqlx::Error),
     #[error(transparent)]
     Serde(#[from] serde_json::Error),
+    #[error(transparent)]
+    Protocol(#[from] ProtocolError),
     #[error("Invalid Task Packet Protocol document: {0}")]
     InvalidDocument(String),
     #[error("Task packet not found")]
@@ -47,6 +53,7 @@ pub struct TaskPacket {
     pub workspace_id: Option<Uuid>,
     pub execution_process_id: Option<Uuid>,
     pub schema_version: i64,
+    pub payload_sha256: String,
     #[ts(type = "unknown")]
     pub packet: Value,
     pub created_at: DateTime<Utc>,
@@ -60,6 +67,7 @@ pub struct TaskPacketResult {
     pub execution_process_id: Option<Uuid>,
     pub schema_version: i64,
     pub status: String,
+    pub payload_sha256: String,
     #[ts(type = "unknown")]
     pub result: Value,
     pub created_at: DateTime<Utc>,
@@ -76,6 +84,7 @@ struct TaskPacketRow {
     execution_process_id: Option<Uuid>,
     schema_version: i64,
     payload: String,
+    payload_sha256: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -88,6 +97,7 @@ struct TaskPacketResultRow {
     schema_version: i64,
     status: String,
     payload: String,
+    payload_sha256: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -120,45 +130,8 @@ fn validate_schema_version(document: &Value) -> Result<i64, TaskPacketError> {
     Ok(version)
 }
 
-fn require_fields(document: &Value, fields: &[&str]) -> Result<(), TaskPacketError> {
-    let object = document.as_object().ok_or_else(|| {
-        TaskPacketError::InvalidDocument("document must be a JSON object".to_string())
-    })?;
-
-    for field in fields {
-        if !object.contains_key(*field) {
-            return Err(TaskPacketError::InvalidDocument(format!(
-                "missing required field '{field}'"
-            )));
-        }
-    }
-
-    Ok(())
-}
-
 fn validate_task_packet(document: &Value) -> Result<(i64, String, String), TaskPacketError> {
-    require_fields(
-        document,
-        &[
-            "schema_version",
-            "packet_id",
-            "task_id",
-            "title",
-            "objective",
-            "kind",
-            "project",
-            "stack",
-            "parallel_group",
-            "scope",
-            "agent_requirements",
-            "context_budget_tokens",
-            "context_slices",
-            "dependencies",
-            "deliverables",
-            "acceptance",
-            "result_consumers",
-        ],
-    )?;
+    validate_task_packet_schema(document)?;
     let version = validate_schema_version(document)?;
     let packet_id = required_string(document, "packet_id")?;
     let task_id = required_string(document, "task_id")?;
@@ -172,25 +145,7 @@ fn validate_result_envelope(
     expected_packet_id: &str,
     expected_task_id: &str,
 ) -> Result<(i64, String), TaskPacketError> {
-    require_fields(
-        document,
-        &[
-            "schema_version",
-            "packet_id",
-            "task_id",
-            "execution",
-            "status",
-            "summary",
-            "changes",
-            "contracts",
-            "validation",
-            "decisions",
-            "risks",
-            "artifacts",
-            "context_used",
-            "context_requested",
-        ],
-    )?;
+    validate_result_schema(document)?;
     let version = validate_schema_version(document)?;
     let packet_id = required_string(document, "packet_id")?;
     let task_id = required_string(document, "task_id")?;
@@ -227,6 +182,7 @@ impl TryFrom<TaskPacketRow> for TaskPacket {
             workspace_id: row.workspace_id,
             execution_process_id: row.execution_process_id,
             schema_version: row.schema_version,
+            payload_sha256: row.payload_sha256,
             packet: serde_json::from_str(&row.payload)?,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -244,6 +200,7 @@ impl TryFrom<TaskPacketResultRow> for TaskPacketResult {
             execution_process_id: row.execution_process_id,
             schema_version: row.schema_version,
             status: row.status,
+            payload_sha256: row.payload_sha256,
             result: serde_json::from_str(&row.payload)?,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -264,11 +221,12 @@ impl TaskPacket {
 
         let id = Uuid::new_v4();
         let payload = serde_json::to_string(&request.packet)?;
+        let payload_sha256 = document_sha256(&request.packet)?;
         sqlx::query(
             r#"INSERT INTO task_packets (
                 id, packet_id, task_id, issue_id, workspace_id,
-                execution_process_id, schema_version, payload
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+                execution_process_id, schema_version, payload, payload_sha256
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(id)
         .bind(&packet_id)
@@ -278,6 +236,7 @@ impl TaskPacket {
         .bind(request.execution_process_id)
         .bind(schema_version)
         .bind(payload)
+        .bind(payload_sha256)
         .execute(pool)
         .await?;
 
@@ -289,7 +248,7 @@ impl TaskPacket {
     pub async fn find_all(pool: &SqlitePool) -> Result<Vec<Self>, TaskPacketError> {
         let rows = sqlx::query_as::<_, TaskPacketRow>(
             r#"SELECT id, packet_id, task_id, issue_id, workspace_id,
-                      execution_process_id, schema_version, payload,
+                      execution_process_id, schema_version, payload, payload_sha256,
                       created_at, updated_at
                FROM task_packets
                ORDER BY created_at DESC"#,
@@ -302,7 +261,7 @@ impl TaskPacket {
     pub async fn find_by_id(pool: &SqlitePool, id: Uuid) -> Result<Option<Self>, TaskPacketError> {
         let row = sqlx::query_as::<_, TaskPacketRow>(
             r#"SELECT id, packet_id, task_id, issue_id, workspace_id,
-                      execution_process_id, schema_version, payload,
+                      execution_process_id, schema_version, payload, payload_sha256,
                       created_at, updated_at
                FROM task_packets WHERE id = ?"#,
         )
@@ -318,7 +277,7 @@ impl TaskPacket {
     ) -> Result<Option<Self>, TaskPacketError> {
         let row = sqlx::query_as::<_, TaskPacketRow>(
             r#"SELECT id, packet_id, task_id, issue_id, workspace_id,
-                      execution_process_id, schema_version, payload,
+                      execution_process_id, schema_version, payload, payload_sha256,
                       created_at, updated_at
                FROM task_packets WHERE packet_id = ?"#,
         )
@@ -337,12 +296,13 @@ impl TaskPacket {
             validate_result_envelope(&request.result, &self.packet_id, &self.task_id)?;
         let id = Uuid::new_v4();
         let payload = serde_json::to_string(&request.result)?;
+        let payload_sha256 = document_sha256(&request.result)?;
 
         sqlx::query(
             r#"INSERT INTO task_packet_results (
                 id, task_packet_id, execution_process_id,
-                schema_version, status, payload
-            ) VALUES (?, ?, ?, ?, ?, ?)"#,
+                schema_version, status, payload, payload_sha256
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)"#,
         )
         .bind(id)
         .bind(self.id)
@@ -350,6 +310,7 @@ impl TaskPacket {
         .bind(schema_version)
         .bind(status)
         .bind(payload)
+        .bind(payload_sha256)
         .execute(pool)
         .await?;
 
@@ -363,7 +324,7 @@ impl TaskPacketResult {
     pub async fn find_by_id(pool: &SqlitePool, id: Uuid) -> Result<Option<Self>, TaskPacketError> {
         let row = sqlx::query_as::<_, TaskPacketResultRow>(
             r#"SELECT id, task_packet_id, execution_process_id,
-                      schema_version, status, payload, created_at, updated_at
+                      schema_version, status, payload, payload_sha256, created_at, updated_at
                FROM task_packet_results WHERE id = ?"#,
         )
         .bind(id)
@@ -378,7 +339,7 @@ impl TaskPacketResult {
     ) -> Result<Vec<Self>, TaskPacketError> {
         let rows = sqlx::query_as::<_, TaskPacketResultRow>(
             r#"SELECT id, task_packet_id, execution_process_id,
-                      schema_version, status, payload, created_at, updated_at
+                      schema_version, status, payload, payload_sha256, created_at, updated_at
                FROM task_packet_results
                WHERE task_packet_id = ?
                ORDER BY created_at ASC"#,
@@ -397,31 +358,23 @@ mod tests {
     use super::{validate_result_envelope, validate_task_packet};
 
     fn task_packet() -> serde_json::Value {
-        json!({
-            "schema_version": 1,
-            "packet_id": "packet-1",
-            "task_id": "task-1",
-            "title": "Validate integration",
-            "objective": "Exercise the adapter.",
-            "kind": "validation",
-            "project": {},
-            "stack": "rust",
-            "parallel_group": null,
-            "scope": {},
-            "agent_requirements": {},
-            "context_budget_tokens": 1024,
-            "context_slices": [],
-            "dependencies": [],
-            "deliverables": ["report"],
-            "acceptance": [],
-            "result_consumers": []
-        })
+        serde_json::from_str(include_str!(
+            "../../../task-packet-protocol/fixtures/task-packet.example.json"
+        ))
+        .unwrap()
     }
 
     #[test]
     fn accepts_protocol_v1_task_packet_shape() {
         let result = validate_task_packet(&task_packet()).unwrap();
-        assert_eq!(result, (1, "packet-1".to_string(), "task-1".to_string()));
+        assert_eq!(
+            result,
+            (
+                1,
+                "weather-042-client".to_string(),
+                "weather-042-client".to_string()
+            )
+        );
     }
 
     #[test]
@@ -433,22 +386,13 @@ mod tests {
 
     #[test]
     fn rejects_result_for_another_packet() {
-        let result = json!({
-            "schema_version": 1,
-            "packet_id": "other-packet",
-            "task_id": "task-1",
-            "execution": {},
-            "status": "complete",
-            "summary": "Done",
-            "changes": [],
-            "contracts": {},
-            "validation": [],
-            "decisions": [],
-            "risks": [],
-            "artifacts": [],
-            "context_used": [],
-            "context_requested": []
-        });
-        assert!(validate_result_envelope(&result, "packet-1", "task-1").is_err());
+        let mut result: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../task-packet-protocol/fixtures/result-envelope.example.json"
+        ))
+        .unwrap();
+        result["packet_id"] = json!("other-packet");
+        assert!(
+            validate_result_envelope(&result, "weather-042-client", "weather-042-client").is_err()
+        );
     }
 }

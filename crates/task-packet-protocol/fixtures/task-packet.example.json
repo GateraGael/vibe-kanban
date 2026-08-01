@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "packet_id": "weather-042-client",
+  "task_id": "weather-042-client",
+  "parent_task_id": "weather-042",
+  "title": "Add a typed weather service client",
+  "objective": "Implement the weather service client behind the existing application interface without changing the user interface.",
+  "kind": "implementation",
+  "project": {
+    "id": "sample-weather-app",
+    "repositories": [
+      {
+        "id": "application",
+        "role": "primary",
+        "root": null
+      },
+      {
+        "id": "service-contracts",
+        "role": "supporting",
+        "root": null
+      }
+    ]
+  },
+  "stack": "application-backend",
+  "parallel_group": "weather-042",
+  "scope": {
+    "read": [
+      {
+        "repository": "application",
+        "path": "AGENTS.md"
+      },
+      {
+        "repository": "application",
+        "path": "src/weather/**"
+      },
+      {
+        "repository": "service-contracts",
+        "path": "weather/v2.json"
+      }
+    ],
+    "write": [
+      {
+        "repository": "application",
+        "path": "src/weather/client/**"
+      },
+      {
+        "repository": "application",
+        "path": "tests/weather/client/**"
+      }
+    ],
+    "forbidden": [
+      {
+        "repository": "application",
+        "path": "src/ui/**"
+      },
+      {
+        "repository": "service-contracts",
+        "path": "**"
+      }
+    ]
+  },
+  "agent_requirements": {
+    "required_capabilities": [
+      "read_files",
+      "write_files",
+      "shell",
+      "structured_output"
+    ],
+    "preferred_capabilities": [
+      "test_execution"
+    ],
+    "constraints": {
+      "network": "forbidden",
+      "interactive_approval": "supported"
+    }
+  },
+  "context_budget_tokens": 3200,
+  "context_slices": [
+    {
+      "id": "weather.client-contract",
+      "summary": "Current weather client interface, service contract, and repository rules.",
+      "authority": "current",
+      "estimated_tokens": 1900,
+      "required": [
+        {
+          "kind": "instruction",
+          "locator": "AGENTS.md",
+          "repository": "application",
+          "headings": [
+            "Testing Guidelines",
+            "Coding Style"
+          ]
+        },
+        {
+          "kind": "symbol",
+          "locator": "src/weather/client.ts",
+          "repository": "application",
+          "symbols": [
+            "WeatherClient",
+            "WeatherResponse"
+          ]
+        },
+        {
+          "kind": "contract",
+          "locator": "weather/v2.json",
+          "repository": "service-contracts"
+        }
+      ],
+      "optional": [
+        {
+          "kind": "file",
+          "locator": "docs/weather-service-troubleshooting.md",
+          "repository": "application",
+          "load_when": "A contract test fails with an undocumented service response."
+        }
+      ],
+      "constraints": [
+        "Preserve the existing WeatherClient public interface.",
+        "Do not make live network calls in tests."
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "task_id": "weather-042-contract",
+      "consume": [
+        "weather_service_v2"
+      ],
+      "result_required": true
+    }
+  ],
+  "deliverables": [
+    "client implementation",
+    "contract tests"
+  ],
+  "acceptance": [
+    {
+      "id": "client-tests",
+      "type": "command",
+      "check": "Run the project-defined weather client test target.",
+      "required": true
+    },
+    {
+      "id": "interface-compatible",
+      "type": "condition",
+      "check": "The existing WeatherClient public interface remains compatible.",
+      "required": true
+    }
+  ],
+  "result_consumers": [
+    "weather-042-integration"
+  ]
+}

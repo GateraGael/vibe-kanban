@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "result-envelope.schema.json",
+  "title": "Task Packet Protocol result envelope",
+  "description": "Structured output that any downstream agent or orchestrator can consume.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "packet_id",
+    "task_id",
+    "execution",
+    "status",
+    "summary",
+    "changes",
+    "contracts",
+    "validation",
+    "decisions",
+    "risks",
+    "artifacts",
+    "context_used",
+    "context_requested"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "packet_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "execution": {
+      "$ref": "execution-provenance.schema.json"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["complete", "blocked", "failed"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "path", "purpose"],
+        "properties": {
+          "repository": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          }
+        }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provided", "changed"],
+      "properties": {
+        "provided": {
+          "type": "object"
+        },
+        "changed": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "validation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["check", "result"],
+        "properties": {
+          "check": {
+            "type": "string",
+            "minLength": 1
+          },
+          "result": {
+            "type": "string",
+            "enum": ["passed", "failed", "blocked", "not_run"]
+          },
+          "details": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "decisions": {
+      "$ref": "#/$defs/stringList"
+    },
+    "risks": {
+      "$ref": "#/$defs/stringList"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["locator", "status"],
+        "properties": {
+          "locator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "type": ["string", "null"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ready", "partial", "invalid"]
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          }
+        }
+      }
+    },
+    "context_used": {
+      "$ref": "#/$defs/stringList"
+    },
+    "context_requested": {
+      "$ref": "#/$defs/stringList"
+    }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

@@ -1,0 +1,252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task-packet.schema.json",
+  "title": "Task Packet Protocol task packet",
+  "description": "A project-, orchestrator-, agent-, and model-neutral input contract for one subtask.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "packet_id",
+    "task_id",
+    "title",
+    "objective",
+    "kind",
+    "project",
+    "stack",
+    "parallel_group",
+    "scope",
+    "agent_requirements",
+    "context_budget_tokens",
+    "context_slices",
+    "dependencies",
+    "deliverables",
+    "acceptance",
+    "result_consumers"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "packet_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_task_id": {
+      "type": ["string", "null"]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "implementation",
+        "investigation",
+        "review",
+        "integration",
+        "validation",
+        "documentation"
+      ]
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repositories"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repositories": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "role"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "role": {
+                "type": "string",
+                "enum": ["primary", "supporting"]
+              },
+              "root": {
+                "type": ["string", "null"]
+              }
+            }
+          }
+        }
+      }
+    },
+    "stack": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parallel_group": {
+      "type": ["string", "null"]
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read", "write", "forbidden"],
+      "properties": {
+        "read": {
+          "$ref": "#/$defs/resourceList"
+        },
+        "write": {
+          "$ref": "#/$defs/resourceList"
+        },
+        "forbidden": {
+          "$ref": "#/$defs/resourceList"
+        }
+      }
+    },
+    "agent_requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_capabilities",
+        "preferred_capabilities",
+        "constraints"
+      ],
+      "properties": {
+        "required_capabilities": {
+          "$ref": "#/$defs/stringList"
+        },
+        "preferred_capabilities": {
+          "$ref": "#/$defs/stringList"
+        },
+        "constraints": {
+          "type": "object",
+          "description": "Project or policy constraints matched by an agent adapter."
+        }
+      }
+    },
+    "context_budget_tokens": {
+      "type": "integer",
+      "minimum": 256
+    },
+    "context_slices": {
+      "type": "array",
+      "items": {
+        "$ref": "context-slice.schema.json"
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["task_id", "consume"],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "consume": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "result_required": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    "deliverables": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "acceptance": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "check", "required"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": ["command", "condition", "review"]
+          },
+          "check": {
+            "type": "string",
+            "minLength": 1
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "result_consumers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "$defs": {
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "path"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "resourceList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/resource"
+      }
+    },
+    "stringList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

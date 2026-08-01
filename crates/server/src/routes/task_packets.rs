@@ -10,6 +10,8 @@ use db::models::task_packet::{
 };
 use deployment::Deployment;
 use serde::Serialize;
+use serde_json::{Value, json};
+use task_packet_protocol::validate_adapter_manifest;
 use ts_rs::TS;
 use utils::response::ApiResponse;
 use uuid::Uuid;
@@ -18,25 +20,48 @@ use crate::{DeploymentImpl, error::ApiError};
 
 #[derive(Debug, Serialize, TS)]
 pub struct TaskPacketAdapterManifest {
-    pub adapter: &'static str,
-    pub adapter_version: &'static str,
-    pub protocol_versions: Vec<i64>,
-    pub capabilities: Vec<&'static str>,
+    pub schema_version: u64,
+    pub adapter_id: &'static str,
+    pub adapter_kind: &'static str,
+    pub display_name: &'static str,
+    pub version: &'static str,
+    pub protocol_versions: Vec<u64>,
+    pub capabilities: Vec<String>,
+    #[ts(type = "unknown")]
+    pub configuration: Value,
+    #[ts(type = "unknown | null")]
+    pub metadata: Option<Value>,
 }
 
-async fn get_adapter_manifest() -> ResponseJson<ApiResponse<TaskPacketAdapterManifest>> {
-    ResponseJson(ApiResponse::success(TaskPacketAdapterManifest {
-        adapter: "vibe-kanban",
-        adapter_version: env!("CARGO_PKG_VERSION"),
-        protocol_versions: vec![SUPPORTED_TASK_PACKET_SCHEMA_VERSION],
+async fn get_adapter_manifest()
+-> Result<ResponseJson<ApiResponse<TaskPacketAdapterManifest>>, ApiError> {
+    let manifest = TaskPacketAdapterManifest {
+        schema_version: SUPPORTED_TASK_PACKET_SCHEMA_VERSION as u64,
+        adapter_id: "vibe-kanban",
+        adapter_kind: "orchestrator",
+        display_name: "Vibe Kanban",
+        version: env!("CARGO_PKG_VERSION"),
+        protocol_versions: vec![SUPPORTED_TASK_PACKET_SCHEMA_VERSION as u64],
         capabilities: vec![
-            "persist_task_packets",
-            "link_issues",
-            "link_workspaces",
-            "link_executions",
-            "persist_result_envelopes",
+            "persist_task_packets".to_string(),
+            "link_issues".to_string(),
+            "link_workspaces".to_string(),
+            "link_executions".to_string(),
+            "persist_result_envelopes".to_string(),
+            "validate_protocol_documents".to_string(),
         ],
-    }))
+        configuration: json!({
+            "task_packet_mode": false,
+            "full_schema_validation": true
+        }),
+        metadata: Some(json!({
+            "status": "persistence_api_v1"
+        })),
+    };
+    let value =
+        serde_json::to_value(&manifest).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    validate_adapter_manifest(&value).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    Ok(ResponseJson(ApiResponse::success(manifest)))
 }
 
 impl From<TaskPacketError> for ApiError {
@@ -44,6 +69,7 @@ impl From<TaskPacketError> for ApiError {
         match error {
             TaskPacketError::Database(error) => ApiError::Database(error),
             TaskPacketError::Serde(error) => ApiError::BadRequest(error.to_string()),
+            TaskPacketError::Protocol(error) => ApiError::BadRequest(error.to_string()),
             TaskPacketError::InvalidDocument(message) => ApiError::BadRequest(message),
             TaskPacketError::NotFound => ApiError::BadRequest("Task packet not found".to_string()),
             TaskPacketError::DuplicatePacketId(packet_id) => {

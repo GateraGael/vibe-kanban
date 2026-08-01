@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "execution-provenance.schema.json",
+  "title": "Task Packet Protocol execution provenance",
+  "description": "Neutral provenance for the orchestrator, agent adapter, model, and run.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["orchestrator", "agent", "started_at"],
+  "properties": {
+    "orchestrator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_id", "run_id"],
+      "properties": {
+        "adapter_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "host": {
+          "type": ["string", "null"]
+        },
+        "workspace_ref": {
+          "type": ["string", "null"]
+        },
+        "session_ref": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapter_id"],
+      "properties": {
+        "adapter_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agent_name": {
+          "type": ["string", "null"]
+        },
+        "model_provider": {
+          "type": ["string", "null"]
+        },
+        "model": {
+          "type": ["string", "null"]
+        },
+        "agent_session_ref": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "task_id": "weather-042",
+  "status": "integrating",
+  "subtasks": [
+    {
+      "packet_id": "weather-042-contract",
+      "task_id": "weather-042-contract",
+      "status": "complete",
+      "execution": null,
+      "write_scope": [
+        {
+          "repository": "service-contracts",
+          "path": "weather/v2.json"
+        }
+      ],
+      "result_locator": "results/weather-042-contract.json"
+    },
+    {
+      "packet_id": "weather-042-client",
+      "task_id": "weather-042-client",
+      "status": "complete",
+      "execution": {
+        "orchestrator": {
+          "adapter_id": "example.local-orchestrator",
+          "run_id": "run-weather-042-client-001",
+          "host": "worker-01",
+          "workspace_ref": "workspace-weather-042-client",
+          "session_ref": "session-001"
+        },
+        "agent": {
+          "adapter_id": "example.command-agent",
+          "agent_name": "implementation-agent",
+          "model_provider": "provider-selected-at-runtime",
+          "model": "model-selected-at-runtime",
+          "agent_session_ref": "agent-session-001"
+        },
+        "started_at": "2026-07-28T00:00:00Z",
+        "ended_at": "2026-07-28T00:08:00Z",
+        "metadata": {
+          "transport": "local-process"
+        }
+      },
+      "write_scope": [
+        {
+          "repository": "application",
+          "path": "src/weather/client/**"
+        },
+        {
+          "repository": "application",
+          "path": "tests/weather/client/**"
+        }
+      ],
+      "result_locator": "results/weather-042-client.json"
+    },
+    {
+      "packet_id": "weather-042-integration",
+      "task_id": "weather-042-integration",
+      "status": "running",
+      "execution": null,
+      "write_scope": [
+        {
+          "repository": "application",
+          "path": "src/weather/index.ts"
+        }
+      ],
+      "result_locator": null
+    }
+  ],
+  "write_owners": [
+    {
+      "resource": {
+        "repository": "service-contracts",
+        "path": "weather/v2.json"
+      },
+      "packet_id": "weather-042-contract"
+    },
+    {
+      "resource": {
+        "repository": "application",
+        "path": "src/weather/client/**"
+      },
+      "packet_id": "weather-042-client"
+    },
+    {
+      "resource": {
+        "repository": "application",
+        "path": "tests/weather/client/**"
+      },
+      "packet_id": "weather-042-client"
+    },
+    {
+      "resource": {
+        "repository": "application",
+        "path": "src/weather/index.ts"
+      },
+      "packet_id": "weather-042-integration"
+    }
+  ],
+  "contracts": {
+    "weather_service_v2": "ready",
+    "weather_client_v2": "ready"
+  },
+  "blocked": [],
+  "integration_checks": [
+    {
+      "id": "contract-tests",
+      "status": "passed",
+      "evidence": "results/weather-042-client.json"
+    },
+    {
+      "id": "application-integration",
+      "status": "pending",
+      "evidence": null
+    }
+  ],
+  "updated_at": "2026-07-28T00:09:00Z"
+}
