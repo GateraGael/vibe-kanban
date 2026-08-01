@@ -40,6 +40,7 @@ pub struct CreateTaskPacket {
 #[derive(Debug, Clone, Deserialize, TS)]
 pub struct CreateTaskPacketResult {
     pub execution_process_id: Option<Uuid>,
+    pub workspace_id: Option<Uuid>,
     #[ts(type = "unknown")]
     pub result: Value,
 }
@@ -318,9 +319,62 @@ impl TaskPacket {
             .await?
             .ok_or(TaskPacketError::NotFound)
     }
+
+    pub async fn create_result_for_run(
+        &self,
+        pool: &SqlitePool,
+        packet_run_id: Uuid,
+        request: &CreateTaskPacketResult,
+    ) -> Result<TaskPacketResult, TaskPacketError> {
+        let (schema_version, status) =
+            validate_result_envelope(&request.result, &self.packet_id, &self.task_id)?;
+        let id = Uuid::new_v4();
+        let payload = serde_json::to_string(&request.result)?;
+        let payload_sha256 = document_sha256(&request.result)?;
+        let inserted = sqlx::query(
+            r#"INSERT INTO task_packet_results (
+                id, task_packet_id, packet_run_id, execution_process_id,
+                schema_version, status, payload, payload_sha256
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(packet_run_id) DO NOTHING"#,
+        )
+        .bind(id)
+        .bind(self.id)
+        .bind(packet_run_id)
+        .bind(request.execution_process_id)
+        .bind(schema_version)
+        .bind(status)
+        .bind(payload)
+        .bind(payload_sha256)
+        .execute(pool)
+        .await?;
+        if inserted.rows_affected() == 0 {
+            return Err(TaskPacketError::InvalidDocument(
+                "a result has already been submitted for this packet run".to_string(),
+            ));
+        }
+        TaskPacketResult::find_by_id(pool, id)
+            .await?
+            .ok_or(TaskPacketError::NotFound)
+    }
 }
 
 impl TaskPacketResult {
+    pub async fn find_by_packet_run_id(
+        pool: &SqlitePool,
+        packet_run_id: Uuid,
+    ) -> Result<Option<Self>, TaskPacketError> {
+        let row = sqlx::query_as::<_, TaskPacketResultRow>(
+            r#"SELECT id, task_packet_id, execution_process_id,
+                      schema_version, status, payload, payload_sha256, created_at, updated_at
+               FROM task_packet_results WHERE packet_run_id = ?"#,
+        )
+        .bind(packet_run_id)
+        .fetch_optional(pool)
+        .await?;
+        row.map(TryInto::try_into).transpose()
+    }
+
     pub async fn find_by_id(pool: &SqlitePool, id: Uuid) -> Result<Option<Self>, TaskPacketError> {
         let row = sqlx::query_as::<_, TaskPacketResultRow>(
             r#"SELECT id, task_packet_id, execution_process_id,

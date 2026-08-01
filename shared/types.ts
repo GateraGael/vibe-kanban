@@ -32,7 +32,7 @@ export type UpdateTag = { tag_name: string | null, content: string | null, };
 
 export type CreateTaskPacket = { issue_id: string | null, workspace_id: string | null, execution_process_id: string | null, packet: unknown, };
 
-export type CreateTaskPacketResult = { execution_process_id: string | null, result: unknown, };
+export type CreateTaskPacketResult = { execution_process_id: string | null, workspace_id: string | null, result: unknown, };
 
 export type TaskPacket = { id: string, packet_id: string, task_id: string, issue_id: string | null, workspace_id: string | null, execution_process_id: string | null, schema_version: bigint, payload_sha256: string, packet: unknown, created_at: string, updated_at: string, };
 
@@ -421,6 +421,20 @@ export type GitRemote = { name: string, url: string, };
 export type ListPrsError = { "type": "cli_not_installed", provider: ProviderKind, } | { "type": "auth_failed", message: string, } | { "type": "unsupported_provider" };
 
 export type TaskPacketAdapterManifest = { schema_version: bigint, adapter_id: string, adapter_kind: string, display_name: string, version: string, protocol_versions: Array<bigint>, capabilities: Array<string>, configuration: unknown, metadata: unknown | null, };
+
+export type CompileAndDispatchTaskPacket = { kind: string | null, acceptance: Array<string> | null, };
+
+export type TaskPacketRunDetails = { parent_run: TaskPacketParentRun, packet_runs: Array<TaskPacketRun>, packet: TaskPacket | null, result: TaskPacketResult | null, };
+
+export type TaskPacketRepositoryMapping = { logical_id: string, repo_id: string, role: string, target_branch: string, read_paths: Array<string>, write_paths: Array<string>, forbidden_paths: Array<string>, };
+
+export type TaskPacketProjectSettings = { remote_project_id: string, local_project_id: string, enabled: boolean, profile: string, executor_config: ExecutorConfig, in_progress_status_id: string | null, review_status_id: string | null, repository_mappings: Array<TaskPacketRepositoryMapping>, created_at: string, updated_at: string, };
+
+export type UpsertTaskPacketProjectSettings = { local_project_id: string, enabled: boolean, profile: string, executor_config: ExecutorConfig, in_progress_status_id: string | null, review_status_id: string | null, repository_mappings: Array<TaskPacketRepositoryMapping>, };
+
+export type TaskPacketParentRun = { id: string, issue_id: string, remote_project_id: string, revision: bigint, state: string, error: string | null, created_at: string, updated_at: string, };
+
+export type TaskPacketRun = { id: string, parent_run_id: string, task_packet_id: string, attempt: bigint, state: string, workspace_id: string | null, execution_process_id: string | null, created_at: string, updated_at: string, };
 
 export type LinkPrToIssueRequest = { pr_url: string, pr_number: number, base_branch: string, };
 

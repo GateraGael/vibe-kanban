@@ -213,6 +213,14 @@ pub async fn create_and_start_workspace(
     State(deployment): State<DeploymentImpl>,
     Json(payload): Json<CreateAndStartWorkspaceRequest>,
 ) -> Result<ResponseJson<ApiResponse<CreateAndStartWorkspaceResponse>>, ApiError> {
+    let response = create_and_start_workspace_inner(&deployment, payload).await?;
+    Ok(ResponseJson(ApiResponse::success(response)))
+}
+
+pub(crate) async fn create_and_start_workspace_inner(
+    deployment: &DeploymentImpl,
+    payload: CreateAndStartWorkspaceRequest,
+) -> Result<CreateAndStartWorkspaceResponse, ApiError> {
     let CreateAndStartWorkspaceRequest {
         name,
         repos,
@@ -311,12 +319,10 @@ pub async fn create_and_start_workspace(
         )
         .await;
 
-    Ok(ResponseJson(ApiResponse::success(
-        CreateAndStartWorkspaceResponse {
-            workspace,
-            execution_process,
-        },
-    )))
+    Ok(CreateAndStartWorkspaceResponse {
+        workspace,
+        execution_process,
+    })
 }
 
 #[cfg(test)]

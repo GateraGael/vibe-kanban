@@ -46,6 +46,7 @@ mod remote_projects;
 mod repos;
 mod sessions;
 mod task_attempts;
+mod task_packets;
 mod workspaces;
 
 impl McpServer {
@@ -60,15 +61,19 @@ impl McpServer {
             + Self::issue_tags_tools_router()
             + Self::issue_relationships_tools_router()
             + Self::task_attempts_tools_router()
+            + Self::task_packets_tools_router()
             + Self::session_tools_router()
     }
 
     pub fn orchestrator_mode_router() -> rmcp::handler::server::tool::ToolRouter<Self> {
         let mut router = Self::context_tools_router()
             + Self::workspaces_tools_router()
+            + Self::task_packets_tools_router()
             + Self::session_tools_router();
         router.remove_route("list_workspaces");
         router.remove_route("delete_workspace");
+        router.remove_route("compile_issue_to_packets");
+        router.remove_route("get_parent_run");
         router
     }
 }
@@ -420,6 +425,7 @@ mod tests {
             "get_execution".to_string(),
             "list_sessions".to_string(),
             "run_session_prompt".to_string(),
+            "submit_task_packet_result".to_string(),
             "update_session".to_string(),
             "update_workspace".to_string(),
         ]);
