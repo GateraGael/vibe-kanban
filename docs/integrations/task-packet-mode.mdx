@@ -1,0 +1,680 @@
+---
+title: "Task Packet Mode API"
+description: "Phase 1 REST and MCP documentation for Vibe Kanban Task Packet Mode."
+---
+
+Task Packet Mode lets Vibe Kanban compile one issue into one Task Packet Protocol v1 document, dispatch that packet to a local coding agent run, and ingest one Result Envelope for review.
+
+<Info>
+Phase 1 is a headless single-packet flow. The adapter manifest reports `max_packets_per_parent_run: 1` and `transport: local-vibe-execution`.
+</Info>
+
+## Overview
+
+Task Packet Mode has two surfaces:
+
+- REST endpoints under `/api` for project configuration, packet persistence, run inspection, and result ingestion
+- MCP tools on the Vibe Kanban MCP server for compile-and-dispatch, parent-run inspection, and Result Envelope submission
+
+All examples on this page use Task Packet Protocol v1 with `schema_version: 1`.
+
+## Project orchestration configuration
+
+Before you can dispatch packets for a project, configure Task Packet Mode for that remote project.
+
+### Configuration fields
+
+| Field | Type | Required | Notes |
+|------|------|------|------|
+| `local_project_id` | UUID | Yes | Local Vibe Kanban project linked to the remote project |
+| `enabled` | boolean | Yes | Enables or disables Task Packet Mode for the project |
+| `profile` | string | Yes | Used as the packet `project.id` and `stack`; must be non-empty |
+| `executor_config` | object | Yes | Coding agent selection, for example `{"executor":"CODEX"}` |
+| `in_progress_status_id` | UUID or `null` | No | Remote issue status to apply after dispatch starts |
+| `review_status_id` | UUID or `null` | No | Remote issue status to apply after a `complete` result |
+| `repository_mappings` | array | Yes | At least one mapping is required |
+
+Each repository mapping must contain:
+
+| Field | Type | Required | Notes |
+|------|------|------|------|
+| `logical_id` | string | Yes | Packet repository identifier |
+| `repo_id` | UUID | Yes | Local repository record used for workspace creation |
+| `role` | string | Yes | Must be `primary` or `supporting` |
+| `target_branch` | string | Yes | Branch checked out for local execution |
+| `read_paths` | array of strings | Yes | Scope entries copied into `scope.read` |
+| `write_paths` | array of strings | Yes | Scope entries copied into `scope.write` |
+| `forbidden_paths` | array of strings | Yes | Scope entries copied into `scope.forbidden` |
+
+### Get orchestration settings
+
+`GET /api/projects/{project_id}/orchestration`
+
+Returns the stored Task Packet Mode settings for a project. If the project is not configured, the API returns `400 Bad Request`.
+
+<RequestExample>
+```bash cURL
+curl -X GET 'http://localhost:3000/api/projects/11111111-1111-1111-1111-111111111111/orchestration'
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "success": true,
+  "data": {
+    "remote_project_id": "11111111-1111-1111-1111-111111111111",
+    "local_project_id": "22222222-2222-2222-2222-222222222222",
+    "enabled": true,
+    "profile": "vibe-kanban",
+    "executor_config": {
+      "executor": "CODEX"
+    },
+    "in_progress_status_id": "33333333-3333-3333-3333-333333333333",
+    "review_status_id": "44444444-4444-4444-4444-444444444444",
+    "repository_mappings": [
+      {
+        "logical_id": "vibe-kanban",
+        "repo_id": "55555555-5555-5555-5555-555555555555",
+        "role": "primary",
+        "target_branch": "main",
+        "read_paths": ["**"],
+        "write_paths": ["docs/**"],
+        "forbidden_paths": ["crates/**", "packages/**", "shared/**"]
+      }
+    ],
+    "created_at": "2026-08-03T10:00:00Z",
+    "updated_at": "2026-08-03T10:00:00Z"
+  }
+}
+```
+</ResponseExample>
+
+### Put orchestration settings
+
+`PUT /api/projects/{project_id}/orchestration`
+
+Creates or updates the project settings. The request is rejected if `profile` is blank, `repository_mappings` is empty, a mapping role is not `primary` or `supporting`, or `target_branch` is blank.
+
+<RequestExample>
+```bash cURL
+curl -X PUT 'http://localhost:3000/api/projects/11111111-1111-1111-1111-111111111111/orchestration' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "local_project_id": "22222222-2222-2222-2222-222222222222",
+    "enabled": true,
+    "profile": "vibe-kanban",
+    "executor_config": {
+      "executor": "CODEX"
+    },
+    "in_progress_status_id": "33333333-3333-3333-3333-333333333333",
+    "review_status_id": "44444444-4444-4444-4444-444444444444",
+    "repository_mappings": [
+      {
+        "logical_id": "vibe-kanban",
+        "repo_id": "55555555-5555-5555-5555-555555555555",
+        "role": "primary",
+        "target_branch": "main",
+        "read_paths": ["**"],
+        "write_paths": ["docs/**"],
+        "forbidden_paths": ["crates/**", "packages/**", "shared/**"]
+      },
+      {
+        "logical_id": "design-system",
+        "repo_id": "66666666-6666-6666-6666-666666666666",
+        "role": "supporting",
+        "target_branch": "main",
+        "read_paths": ["tokens/**", "docs/**"],
+        "write_paths": [],
+        "forbidden_paths": ["**"]
+      }
+    ]
+  }'
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "success": true,
+  "data": {
+    "remote_project_id": "11111111-1111-1111-1111-111111111111",
+    "local_project_id": "22222222-2222-2222-2222-222222222222",
+    "enabled": true,
+    "profile": "vibe-kanban",
+    "executor_config": {
+      "executor": "CODEX"
+    },
+    "in_progress_status_id": "33333333-3333-3333-3333-333333333333",
+    "review_status_id": "44444444-4444-4444-4444-444444444444",
+    "repository_mappings": [
+      {
+        "logical_id": "vibe-kanban",
+        "repo_id": "55555555-5555-5555-5555-555555555555",
+        "role": "primary",
+        "target_branch": "main",
+        "read_paths": ["**"],
+        "write_paths": ["docs/**"],
+        "forbidden_paths": ["crates/**", "packages/**", "shared/**"]
+      },
+      {
+        "logical_id": "design-system",
+        "repo_id": "66666666-6666-6666-6666-666666666666",
+        "role": "supporting",
+        "target_branch": "main",
+        "read_paths": ["tokens/**", "docs/**"],
+        "write_paths": [],
+        "forbidden_paths": ["**"]
+      }
+    ],
+    "created_at": "2026-08-03T10:00:00Z",
+    "updated_at": "2026-08-03T10:05:00Z"
+  }
+}
+```
+</ResponseExample>
+
+## Phase 1 REST endpoints
+
+### Adapter manifest
+
+`GET /api/task-packets/adapter-manifest`
+
+Returns the orchestrator adapter manifest for Task Packet Protocol v1.
+
+<ResponseExample>
+```json Success
+{
+  "success": true,
+  "data": {
+    "schema_version": 1,
+    "adapter_id": "vibe-kanban",
+    "adapter_kind": "orchestrator",
+    "display_name": "Vibe Kanban",
+    "version": "0.1.44",
+    "protocol_versions": [1],
+    "capabilities": [
+      "persist_task_packets",
+      "link_issues",
+      "link_workspaces",
+      "link_executions",
+      "persist_result_envelopes",
+      "validate_protocol_documents",
+      "compile_single_packet",
+      "dispatch_local_execution",
+      "ingest_result_via_mcp",
+      "project_board_state"
+    ],
+    "configuration": {
+      "task_packet_mode": "project-configurable",
+      "full_schema_validation": true,
+      "max_packets_per_parent_run": 1,
+      "transport": "local-vibe-execution"
+    },
+    "metadata": {
+      "status": "headless_single_packet_v1"
+    }
+  }
+}
+```
+</ResponseExample>
+
+### Task packet persistence
+
+These endpoints store and inspect validated protocol documents directly. They are useful for integrations, diagnostics, and tests.
+
+| Method | Path | Purpose |
+|------|------|------|
+| `GET` | `/api/task-packets` | List all stored task packets |
+| `POST` | `/api/task-packets` | Persist one schema-valid Task Packet Protocol v1 packet |
+| `GET` | `/api/task-packets/{task_packet_id}` | Fetch one stored task packet by database ID |
+| `GET` | `/api/task-packets/{task_packet_id}/results` | List all stored result envelopes for that packet |
+| `POST` | `/api/task-packets/{task_packet_id}/results` | Persist one schema-valid Result Envelope for that packet |
+
+`POST /api/task-packets` accepts:
+
+```json
+{
+  "issue_id": "optional UUID",
+  "workspace_id": "optional UUID",
+  "execution_process_id": "optional UUID",
+  "packet": { "schema_version": 1 }
+}
+```
+
+`POST /api/task-packets/{task_packet_id}/results` accepts:
+
+```json
+{
+  "execution_process_id": "optional UUID",
+  "workspace_id": "optional UUID",
+  "result": { "schema_version": 1 }
+}
+```
+
+<Tip>
+The server validates both packet and result payloads against Task Packet Protocol v1 and rejects duplicate `packet_id` values.
+</Tip>
+
+### Issue compilation and local dispatch
+
+These endpoints drive the Phase 1 orchestration flow.
+
+| Method | Path | Purpose |
+|------|------|------|
+| `GET` | `/api/issues/{issue_id}/task-packet-runs` | List parent runs for an issue |
+| `POST` | `/api/issues/{issue_id}/task-packet-runs` | Compile one packet, create one local workspace execution, and return run details |
+| `GET` | `/api/task-packet-runs/{parent_run_id}` | Inspect one parent run, its packet run, stored packet, and submitted result |
+| `POST` | `/api/packet-runs/{packet_run_id}/result` | Submit the single Result Envelope for a packet run |
+
+`POST /api/issues/{issue_id}/task-packet-runs` accepts:
+
+```json
+{
+  "kind": "documentation",
+  "acceptance": [
+    "Every Phase 1 REST endpoint is documented.",
+    "Return one schema-valid Result Envelope through submit_task_packet_result."
+  ]
+}
+```
+
+The compiled packet uses:
+
+- `schema_version: 1`
+- `packet_id: "{issue.simple_id}-r{revision}"`
+- `project.id` and `stack` from the orchestration `profile`
+- `project.repositories` and `scope` entries derived from `repository_mappings`
+- `agent_requirements.constraints.transport: "local-vibe-execution"`
+
+If dispatch succeeds, the response includes:
+
+- `parent_run`: the orchestration record for the issue revision
+- `packet_runs`: the single Phase 1 packet run
+- `packet`: the compiled Task Packet Protocol v1 document
+- `result`: `null` until a Result Envelope is submitted
+
+### Parent-run inspection
+
+Use `GET /api/task-packet-runs/{parent_run_id}` to inspect orchestration state after dispatch.
+
+<RequestExample>
+```bash cURL
+curl -X GET 'http://localhost:3000/api/task-packet-runs/77777777-7777-7777-7777-777777777777'
+```
+</RequestExample>
+
+<ResponseExample>
+```json Success
+{
+  "success": true,
+  "data": {
+    "parent_run": {
+      "id": "77777777-7777-7777-7777-777777777777",
+      "issue_id": "88888888-8888-8888-8888-888888888888",
+      "remote_project_id": "11111111-1111-1111-1111-111111111111",
+      "revision": 4,
+      "state": "running",
+      "error": null,
+      "created_at": "2026-08-03T10:10:00Z",
+      "updated_at": "2026-08-03T10:10:05Z"
+    },
+    "packet_runs": [
+      {
+        "id": "99999999-9999-9999-9999-999999999999",
+        "parent_run_id": "77777777-7777-7777-7777-777777777777",
+        "task_packet_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "attempt": 1,
+        "state": "running",
+        "workspace_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "execution_process_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        "created_at": "2026-08-03T10:10:00Z",
+        "updated_at": "2026-08-03T10:10:05Z"
+      }
+    ],
+    "packet": {
+      "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "packet_id": "GAT-1-r4",
+      "task_id": "dc493b9f-1716-4266-97fd-425747eec6b1",
+      "issue_id": "88888888-8888-8888-8888-888888888888",
+      "workspace_id": null,
+      "execution_process_id": null,
+      "schema_version": 1,
+      "payload_sha256": "sha256-packet-placeholder",
+      "packet": {
+        "schema_version": 1,
+        "packet_id": "GAT-1-r4",
+        "task_id": "dc493b9f-1716-4266-97fd-425747eec6b1"
+      },
+      "created_at": "2026-08-03T10:10:00Z",
+      "updated_at": "2026-08-03T10:10:00Z"
+    },
+    "result": null
+  }
+}
+```
+</ResponseExample>
+
+### Result Envelope submission
+
+`POST /api/packet-runs/{packet_run_id}/result`
+
+This endpoint accepts exactly one Result Envelope for the packet run. The server rejects the request if:
+
+- `workspace_id` is missing
+- `workspace_id` does not match the packet run's workspace
+- `result.execution.orchestrator.run_id` does not match `packet_run_id`
+- the Result Envelope is not Task Packet Protocol v1 valid
+- a result was already submitted for that run
+
+<Warning>
+The run ID check is strict. `execution.orchestrator.run_id` must equal the packet run UUID, not the parent run UUID.
+</Warning>
+
+<RequestExample>
+```bash cURL
+curl -X POST 'http://localhost:3000/api/packet-runs/99999999-9999-9999-9999-999999999999/result' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "execution_process_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+    "workspace_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    "result": {
+      "schema_version": 1,
+      "packet_id": "GAT-1-r4",
+      "task_id": "dc493b9f-1716-4266-97fd-425747eec6b1",
+      "execution": {
+        "orchestrator": {
+          "adapter_id": "vibe-kanban",
+          "run_id": "99999999-9999-9999-9999-999999999999",
+          "host": "local",
+          "workspace_ref": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "session_ref": "session-42"
+        },
+        "agent": {
+          "adapter_id": "vibe-local-agent",
+          "agent_name": "codex",
+          "model_provider": "openai",
+          "model": "gpt-5",
+          "agent_session_ref": "agent-session-42"
+        },
+        "started_at": "2026-08-03T10:10:05Z",
+        "ended_at": "2026-08-03T10:16:10Z",
+        "metadata": {
+          "transport": "local-vibe-execution"
+        }
+      },
+      "status": "complete",
+      "summary": "Documented the Phase 1 Task Packet Mode REST and MCP APIs.",
+      "changes": [
+        {
+          "repository": "vibe-kanban",
+          "path": "docs/integrations/task-packet-mode.mdx",
+          "purpose": "Add Phase 1 Task Packet Mode documentation."
+        }
+      ],
+      "contracts": {
+        "provided": {},
+        "changed": []
+      },
+      "validation": [
+        {
+          "check": "Documentation formatting checks pass.",
+          "result": "passed",
+          "details": "MDX structure and examples validated locally."
+        }
+      ],
+      "decisions": [],
+      "risks": [],
+      "artifacts": [],
+      "context_used": [],
+      "context_requested": []
+    }
+  }'
+```
+</RequestExample>
+
+## MCP tools
+
+Task Packet Mode exposes three MCP operations on the Vibe Kanban MCP server.
+
+| Tool | Purpose | Required parameters |
+|------|------|------|
+| `compile_issue_to_packets` | Compile one issue into one validated packet and dispatch it to a local execution | `issue_id` |
+| `get_parent_run` | Fetch one parent run, its packet run, packet, and result | `parent_run_id` |
+| `submit_task_packet_result` | Submit the single schema-valid Result Envelope for a packet run | `packet_run_id`, `result` |
+
+### `compile_issue_to_packets`
+
+This tool calls `POST /api/issues/{issue_id}/task-packet-runs` and forwards optional `kind` and `acceptance` values.
+
+```json
+{
+  "issue_id": "88888888-8888-8888-8888-888888888888",
+  "kind": "documentation",
+  "acceptance": [
+    "Every Phase 1 REST endpoint is documented.",
+    "All three Task Packet MCP operations are documented."
+  ]
+}
+```
+
+### `get_parent_run`
+
+This tool calls `GET /api/task-packet-runs/{parent_run_id}`.
+
+```json
+{
+  "parent_run_id": "77777777-7777-7777-7777-777777777777"
+}
+```
+
+### `submit_task_packet_result`
+
+This tool requires workspace context. It injects the current workspace ID into the REST submission payload and calls `POST /api/packet-runs/{packet_run_id}/result`.
+
+```json
+{
+  "packet_run_id": "99999999-9999-9999-9999-999999999999",
+  "result": {
+    "schema_version": 1,
+    "packet_id": "GAT-1-r4",
+    "task_id": "dc493b9f-1716-4266-97fd-425747eec6b1",
+    "execution": {
+      "orchestrator": {
+        "adapter_id": "vibe-kanban",
+        "run_id": "99999999-9999-9999-9999-999999999999",
+        "host": "local",
+        "workspace_ref": "current-workspace",
+        "session_ref": "current-session"
+      },
+      "agent": {
+        "adapter_id": "vibe-local-agent",
+        "agent_name": "current-agent",
+        "model_provider": "current-provider",
+        "model": "current-model",
+        "agent_session_ref": "current-agent-session"
+      },
+      "started_at": "2026-08-03T10:10:05Z",
+      "ended_at": "2026-08-03T10:16:10Z",
+      "metadata": {
+        "transport": "local-vibe-execution"
+      }
+    },
+    "status": "complete",
+    "summary": "Completed the Task Packet objective.",
+    "changes": [],
+    "contracts": {
+      "provided": {},
+      "changed": []
+    },
+    "validation": [],
+    "decisions": [],
+    "risks": [],
+    "artifacts": [],
+    "context_used": [],
+    "context_requested": []
+  }
+}
+```
+
+## Complete headless execution example
+
+This example shows the full Phase 1 flow from configuration to Result Envelope submission.
+
+<Steps>
+<Step title="Configure Task Packet Mode for the project">
+Store the orchestration settings with `PUT /api/projects/{project_id}/orchestration`.
+
+```bash
+curl -X PUT 'http://localhost:3000/api/projects/11111111-1111-1111-1111-111111111111/orchestration' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "local_project_id": "22222222-2222-2222-2222-222222222222",
+    "enabled": true,
+    "profile": "vibe-kanban",
+    "executor_config": {"executor": "CODEX"},
+    "in_progress_status_id": "33333333-3333-3333-3333-333333333333",
+    "review_status_id": "44444444-4444-4444-4444-444444444444",
+    "repository_mappings": [
+      {
+        "logical_id": "vibe-kanban",
+        "repo_id": "55555555-5555-5555-5555-555555555555",
+        "role": "primary",
+        "target_branch": "main",
+        "read_paths": ["**"],
+        "write_paths": ["docs/**"],
+        "forbidden_paths": ["crates/**", "packages/**", "shared/**"]
+      }
+    ]
+  }'
+```
+</Step>
+
+<Step title="Compile and dispatch the issue">
+Dispatch the Task Packet through MCP or REST.
+
+<CodeGroup>
+```json MCP
+{
+  "tool": "compile_issue_to_packets",
+  "arguments": {
+    "issue_id": "88888888-8888-8888-8888-888888888888",
+    "kind": "documentation",
+    "acceptance": [
+      "Every Phase 1 REST endpoint is documented.",
+      "All three Task Packet MCP operations are documented.",
+      "Examples use Task Packet Protocol v1."
+    ]
+  }
+}
+```
+
+```bash REST
+curl -X POST 'http://localhost:3000/api/issues/88888888-8888-8888-8888-888888888888/task-packet-runs' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "kind": "documentation",
+    "acceptance": [
+      "Every Phase 1 REST endpoint is documented.",
+      "All three Task Packet MCP operations are documented.",
+      "Examples use Task Packet Protocol v1."
+    ]
+  }'
+```
+</CodeGroup>
+
+Capture `data.parent_run.id` and `data.packet_runs[0].id` from the response.
+</Step>
+
+<Step title="Inspect the parent run while the local agent executes">
+Query the parent run until you have the packet, the packet run metadata, or a submitted result.
+
+<CodeGroup>
+```json MCP
+{
+  "tool": "get_parent_run",
+  "arguments": {
+    "parent_run_id": "77777777-7777-7777-7777-777777777777"
+  }
+}
+```
+
+```bash REST
+curl -X GET 'http://localhost:3000/api/task-packet-runs/77777777-7777-7777-7777-777777777777'
+```
+</CodeGroup>
+</Step>
+
+<Step title="Submit the Result Envelope">
+Submit exactly one schema-valid Result Envelope for the packet run. If you are using MCP, call `submit_task_packet_result` from the workspace session created by the dispatch step.
+
+```json
+{
+  "tool": "submit_task_packet_result",
+  "arguments": {
+    "packet_run_id": "99999999-9999-9999-9999-999999999999",
+    "result": {
+      "schema_version": 1,
+      "packet_id": "GAT-1-r4",
+      "task_id": "dc493b9f-1716-4266-97fd-425747eec6b1",
+      "execution": {
+        "orchestrator": {
+          "adapter_id": "vibe-kanban",
+          "run_id": "99999999-9999-9999-9999-999999999999",
+          "host": "local",
+          "workspace_ref": "current-workspace",
+          "session_ref": "current-session"
+        },
+        "agent": {
+          "adapter_id": "vibe-local-agent",
+          "agent_name": "current-agent",
+          "model_provider": "current-provider",
+          "model": "current-model",
+          "agent_session_ref": "current-agent-session"
+        },
+        "started_at": "2026-08-03T10:10:05Z",
+        "ended_at": "2026-08-03T10:16:10Z",
+        "metadata": {
+          "transport": "local-vibe-execution"
+        }
+      },
+      "status": "complete",
+      "summary": "Completed the immutable Task Packet within scope.",
+      "changes": [
+        {
+          "repository": "vibe-kanban",
+          "path": "docs/integrations/task-packet-mode.mdx",
+          "purpose": "Document Phase 1 Task Packet Mode."
+        }
+      ],
+      "contracts": {
+        "provided": {},
+        "changed": []
+      },
+      "validation": [
+        {
+          "check": "Examples use Task Packet Protocol v1.",
+          "result": "passed",
+          "details": "All packet and result examples use schema_version 1."
+        }
+      ],
+      "decisions": [],
+      "risks": [],
+      "artifacts": [],
+      "context_used": [],
+      "context_requested": []
+    }
+  }
+}
+```
+
+<Check>
+When the result status is `complete`, the parent run moves to `review`. The project's configured `review_status_id` is also applied to the remote issue when present.
+</Check>
+</Step>
+</Steps>
+
+## Related pages
+
+- [Vibe Kanban MCP Server](/integrations/vibe-kanban-mcp-server)
+- [Connecting MCP Servers](/integrations/mcp-server-configuration)
