@@ -428,9 +428,9 @@ export type TaskPacketRunDetails = { parent_run: TaskPacketParentRun, packet_run
 
 export type TaskPacketRepositoryMapping = { logical_id: string, repo_id: string, role: string, target_branch: string, read_paths: Array<string>, write_paths: Array<string>, forbidden_paths: Array<string>, };
 
-export type TaskPacketProjectSettings = { remote_project_id: string, local_project_id: string, enabled: boolean, profile: string, executor_config: ExecutorConfig, in_progress_status_id: string | null, review_status_id: string | null, repository_mappings: Array<TaskPacketRepositoryMapping>, created_at: string, updated_at: string, };
+export type TaskPacketProjectSettings = { remote_project_id: string, local_project_id: string | null, enabled: boolean, profile: string, executor_config: ExecutorConfig, in_progress_status_id: string | null, review_status_id: string | null, repository_mappings: Array<TaskPacketRepositoryMapping>, created_at: string, updated_at: string, };
 
-export type UpsertTaskPacketProjectSettings = { local_project_id: string, enabled: boolean, profile: string, executor_config: ExecutorConfig, in_progress_status_id: string | null, review_status_id: string | null, repository_mappings: Array<TaskPacketRepositoryMapping>, };
+export type UpsertTaskPacketProjectSettings = { local_project_id: string | null, enabled: boolean, profile: string, executor_config: ExecutorConfig, in_progress_status_id: string | null, review_status_id: string | null, repository_mappings: Array<TaskPacketRepositoryMapping>, };
 
 export type TaskPacketParentRun = { id: string, issue_id: string, remote_project_id: string, revision: bigint, state: string, error: string | null, created_at: string, updated_at: string, };
 

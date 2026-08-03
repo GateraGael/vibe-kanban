@@ -1,6 +1,6 @@
 CREATE TABLE task_packet_project_settings (
     remote_project_id BLOB PRIMARY KEY NOT NULL,
-    local_project_id BLOB NOT NULL,
+    local_project_id BLOB,
     enabled INTEGER NOT NULL DEFAULT 0,
     profile TEXT NOT NULL,
     executor_config TEXT NOT NULL,

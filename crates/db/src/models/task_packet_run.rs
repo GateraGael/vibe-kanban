@@ -19,7 +19,7 @@ pub struct TaskPacketRepositoryMapping {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TaskPacketProjectSettings {
     pub remote_project_id: Uuid,
-    pub local_project_id: Uuid,
+    pub local_project_id: Option<Uuid>,
     pub enabled: bool,
     pub profile: String,
     pub executor_config: ExecutorConfig,
@@ -32,7 +32,7 @@ pub struct TaskPacketProjectSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct UpsertTaskPacketProjectSettings {
-    pub local_project_id: Uuid,
+    pub local_project_id: Option<Uuid>,
     pub enabled: bool,
     pub profile: String,
     pub executor_config: ExecutorConfig,
@@ -44,7 +44,7 @@ pub struct UpsertTaskPacketProjectSettings {
 #[derive(Debug, FromRow)]
 struct SettingsRow {
     remote_project_id: Uuid,
-    local_project_id: Uuid,
+    local_project_id: Option<Uuid>,
     enabled: bool,
     profile: String,
     executor_config: String,
