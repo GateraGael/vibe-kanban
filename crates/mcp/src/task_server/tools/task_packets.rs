@@ -35,6 +35,13 @@ struct TaskPacketToolResponse {
     data: Value,
 }
 
+fn parse_result_document(result: Value) -> Result<Value, serde_json::Error> {
+    match result {
+        Value::String(document) => serde_json::from_str(&document),
+        document => Ok(document),
+    }
+}
+
 #[tool_router(router = task_packets_tools_router, vis = "pub")]
 impl McpServer {
     #[tool(
@@ -85,6 +92,15 @@ impl McpServer {
                 );
             }
         };
+        let result = match parse_result_document(request.result) {
+            Ok(result) => result,
+            Err(error) => {
+                return McpServer::err(
+                    "The Result Envelope JSON string is invalid".to_string(),
+                    Some(error.to_string()),
+                );
+            }
+        };
         let url = self.url(&format!(
             "/api/packet-runs/{}/result",
             request.packet_run_id
@@ -92,12 +108,38 @@ impl McpServer {
         let payload = serde_json::json!({
             "execution_process_id": null,
             "workspace_id": workspace_id,
-            "result": request.result
+            "result": result
         });
         let response: Value = match self.send_json(self.client.post(&url).json(&payload)).await {
             Ok(value) => value,
             Err(error) => return Ok(McpServer::tool_error(error)),
         };
         McpServer::success(&TaskPacketToolResponse { data: response })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::parse_result_document;
+
+    #[test]
+    fn accepts_object_result_document() {
+        let document = json!({"schema_version": 1});
+        assert_eq!(parse_result_document(document.clone()).unwrap(), document);
+    }
+
+    #[test]
+    fn accepts_json_string_result_document() {
+        assert_eq!(
+            parse_result_document(json!(r#"{"schema_version":1}"#)).unwrap(),
+            json!({"schema_version": 1})
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_json_string_result_document() {
+        assert!(parse_result_document(json!("not-json")).is_err());
     }
 }
