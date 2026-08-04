@@ -24,6 +24,29 @@ pub fn codex_home() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".codex"))
 }
 
+fn vibe_kanban_mcp_command() -> String {
+    if let Ok(command) = env::var("VIBE_KANBAN_MCP_BIN")
+        && !command.trim().is_empty()
+    {
+        return command;
+    }
+
+    if let Ok(current_exe) = env::current_exe()
+        && let Some(parent) = current_exe.parent()
+    {
+        let candidate = parent.join(if cfg!(windows) {
+            "vibe-kanban-mcp.exe"
+        } else {
+            "vibe-kanban-mcp"
+        });
+        if candidate.is_file() {
+            return candidate.to_string_lossy().into_owned();
+        }
+    }
+
+    "vibe-kanban-mcp".to_string()
+}
+
 pub(crate) fn resolve_model(model: Option<&str>) -> (Option<&str>, bool) {
     match model.and_then(|m| m.strip_suffix("-fast")) {
         Some(base) => (Some(base), true),
@@ -507,6 +530,20 @@ impl Codex {
             );
         }
 
+        // Every agent launched by Vibe runs inside a managed workspace. Register
+        // the orchestrator-scoped MCP server per thread so it can resolve that
+        // workspace and expose only scoped workflow tools, including Task Packet
+        // result submission. This avoids mutating the user's global Codex config.
+        let map = config.get_or_insert_with(HashMap::new);
+        map.insert(
+            "mcp_servers.vibe_kanban.command".to_string(),
+            Value::String(vibe_kanban_mcp_command()),
+        );
+        map.insert(
+            "mcp_servers.vibe_kanban.args".to_string(),
+            serde_json::json!(["--mode", "orchestrator"]),
+        );
+
         let (model, is_fast) = resolve_model(self.model.as_deref());
         let service_tier = if is_fast {
             Some(Some(ServiceTier::Fast))
@@ -763,7 +800,9 @@ impl Codex {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_model;
+    use std::path::Path;
+
+    use super::{Codex, resolve_model};
 
     #[test]
     fn resolve_model_detects_fast_suffix() {
@@ -779,5 +818,18 @@ mod tests {
             (Some("gpt-5.4-mini"), false)
         );
         assert_eq!(resolve_model(None), (None, false));
+    }
+
+    #[test]
+    fn thread_config_registers_scoped_vibe_mcp_server() {
+        let codex: Codex = serde_json::from_value(serde_json::json!({})).expect("default Codex");
+        let params = codex.build_thread_start_params(Path::new("/tmp/workspace"));
+        let config = params.config.expect("thread config");
+
+        assert!(config.contains_key("mcp_servers.vibe_kanban.command"));
+        assert_eq!(
+            config.get("mcp_servers.vibe_kanban.args"),
+            Some(&serde_json::json!(["--mode", "orchestrator"]))
+        );
     }
 }
