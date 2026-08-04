@@ -125,10 +125,11 @@ impl McpServer {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            return Err(ToolError::message(format!(
-                "VK API returned error status: {}",
-                status
-            )));
+            let details = resp.text().await.unwrap_or_default();
+            return Err(ToolError::new(
+                format!("VK API returned error status: {status}"),
+                (!details.trim().is_empty()).then_some(details),
+            ));
         }
 
         let api_response = resp

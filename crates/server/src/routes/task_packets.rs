@@ -281,7 +281,7 @@ fn execution_prompt(packet_run_id: Uuid, packet: &Value) -> Result<String, ApiEr
     let packet = serde_json::to_string_pretty(packet)
         .map_err(|error| ApiError::BadRequest(error.to_string()))?;
     Ok(format!(
-        "Execute the following immutable Task Packet exactly within its declared scope. Follow repository instructions, perform the acceptance checks, and do not expand permissions. When finished, call the Vibe MCP tool `submit_task_packet_result` exactly once with packet_run_id `{packet_run_id}` and a schema-valid Result Envelope. Do not treat a prose summary as submission. Use the Result Envelope shape below and replace every placeholder with accurate data.\n\nTask Packet:\n```json\n{packet}\n```\n\nResult Envelope shape:\n```json\n{{\n  \"schema_version\": 1,\n  \"packet_id\": \"{packet_id}\",\n  \"task_id\": \"{task_id}\",\n  \"execution\": {{\n    \"orchestrator\": {{\"adapter_id\": \"vibe-kanban\", \"run_id\": \"{packet_run_id}\", \"host\": \"local\", \"workspace_ref\": \"current-workspace\", \"session_ref\": \"current-session\"}},\n    \"agent\": {{\"adapter_id\": \"vibe-local-agent\", \"agent_name\": \"current-agent\", \"model_provider\": \"current-provider\", \"model\": \"current-model\", \"agent_session_ref\": \"current-agent-session\"}},\n    \"started_at\": \"RFC3339 timestamp\",\n    \"ended_at\": \"RFC3339 timestamp\",\n    \"metadata\": {{\"transport\": \"local-vibe-execution\"}}\n  }},\n  \"status\": \"complete|blocked|failed\",\n  \"summary\": \"concise outcome\",\n  \"changes\": [{{\"repository\": \"logical repository id\", \"path\": \"changed/path\", \"purpose\": \"why it changed\"}}],\n  \"contracts\": {{\"provided\": {{}}, \"changed\": []}},\n  \"validation\": [{{\"check\": \"acceptance check\", \"result\": \"passed|failed|blocked|not_run\", \"details\": \"evidence\"}}],\n  \"decisions\": [],\n  \"risks\": [],\n  \"artifacts\": [],\n  \"context_used\": [],\n  \"context_requested\": []\n}}\n```"
+        "Execute the following immutable Task Packet exactly within its declared scope. Follow repository instructions, perform the acceptance checks, and do not expand permissions. When finished, call the Vibe MCP tool `submit_task_packet_result` exactly once with packet_run_id `{packet_run_id}` and a schema-valid Result Envelope. Do not treat a prose summary as submission. Use the Result Envelope shape below and replace every placeholder with accurate data. `context_used` and `context_requested` must contain strings only; leave them empty when there are no protocol context-slice IDs to report.\n\nTask Packet:\n```json\n{packet}\n```\n\nResult Envelope shape:\n```json\n{{\n  \"schema_version\": 1,\n  \"packet_id\": \"{packet_id}\",\n  \"task_id\": \"{task_id}\",\n  \"execution\": {{\n    \"orchestrator\": {{\"adapter_id\": \"vibe-kanban\", \"run_id\": \"{packet_run_id}\", \"host\": \"local\", \"workspace_ref\": \"current-workspace\", \"session_ref\": \"current-session\"}},\n    \"agent\": {{\"adapter_id\": \"vibe-local-agent\", \"agent_name\": \"current-agent\", \"model_provider\": \"current-provider\", \"model\": \"current-model\", \"agent_session_ref\": \"current-agent-session\"}},\n    \"started_at\": \"RFC3339 timestamp\",\n    \"ended_at\": \"RFC3339 timestamp\",\n    \"metadata\": {{\"transport\": \"local-vibe-execution\"}}\n  }},\n  \"status\": \"complete|blocked|failed\",\n  \"summary\": \"concise outcome\",\n  \"changes\": [{{\"repository\": \"logical repository id\", \"path\": \"changed/path\", \"purpose\": \"why it changed\"}}],\n  \"contracts\": {{\"provided\": {{}}, \"changed\": []}},\n  \"validation\": [{{\"check\": \"acceptance check\", \"result\": \"passed|failed|blocked|not_run\", \"details\": \"evidence\"}}],\n  \"decisions\": [],\n  \"risks\": [],\n  \"artifacts\": [],\n  \"context_used\": [],\n  \"context_requested\": []\n}}\n```"
     ))
 }
 
@@ -500,7 +500,6 @@ async fn persist_packet_run_result(
     let packet = TaskPacket::find_by_id(pool, run.task_packet_id)
         .await?
         .ok_or(TaskPacketError::NotFound)?;
-    run.set_state(pool, "validating").await?;
     let result = packet
         .create_result_for_run(
             pool,
@@ -512,6 +511,7 @@ async fn persist_packet_run_result(
             },
         )
         .await?;
+    run.set_state(pool, "validating").await?;
     let final_state = result.status.as_str();
     run.set_state(pool, final_state).await?;
     let parent = TaskPacketParentRun::find(pool, run.parent_run_id)
@@ -736,6 +736,7 @@ mod tests {
         let prompt = execution_prompt(run_id, &json!({"packet_id": "packet-1"})).unwrap();
         assert!(prompt.contains("submit_task_packet_result"));
         assert!(prompt.contains(&run_id.to_string()));
+        assert!(prompt.contains("must contain strings only"));
     }
 
     #[test]
