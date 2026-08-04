@@ -176,6 +176,14 @@ async fn put_project_settings(
     Path(project_id): Path<Uuid>,
     Json(request): Json<UpsertTaskPacketProjectSettings>,
 ) -> Result<ResponseJson<ApiResponse<TaskPacketProjectSettings>>, ApiError> {
+    validate_project_settings(&request)?;
+    let settings = TaskPacketProjectSettings::upsert(&deployment.db().pool, project_id, &request)
+        .await
+        .map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    Ok(ResponseJson(ApiResponse::success(settings)))
+}
+
+fn validate_project_settings(request: &UpsertTaskPacketProjectSettings) -> Result<(), ApiError> {
     if request.profile.trim().is_empty() || request.repository_mappings.is_empty() {
         return Err(ApiError::BadRequest(
             "A profile and at least one repository mapping are required".to_string(),
@@ -192,10 +200,7 @@ async fn put_project_settings(
             )));
         }
     }
-    let settings = TaskPacketProjectSettings::upsert(&deployment.db().pool, project_id, &request)
-        .await
-        .map_err(|error| ApiError::BadRequest(error.to_string()))?;
-    Ok(ResponseJson(ApiResponse::success(settings)))
+    Ok(())
 }
 
 fn compile_packet(
@@ -447,6 +452,27 @@ async fn submit_packet_run_result(
     let run = TaskPacketRun::find(&deployment.db().pool, packet_run_id)
         .await?
         .ok_or_else(|| ApiError::BadRequest("Task Packet run not found".to_string()))?;
+    validate_packet_run_result_submission(&run, &request)?;
+    let result = persist_packet_run_result(&deployment.db().pool, &run, request.result).await?;
+    let parent = TaskPacketParentRun::find(&deployment.db().pool, run.parent_run_id)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest("Task Packet parent run not found".to_string()))?;
+    let final_state = result.status.as_str();
+    let settings = TaskPacketProjectSettings::find(&deployment.db().pool, parent.remote_project_id)
+        .await
+        .map_err(|error| ApiError::BadRequest(error.to_string()))?;
+    if final_state == "complete"
+        && let Some(settings) = settings
+    {
+        project_issue_status(&deployment, parent.issue_id, settings.review_status_id).await?;
+    }
+    Ok(ResponseJson(ApiResponse::success(result)))
+}
+
+fn validate_packet_run_result_submission(
+    run: &TaskPacketRun,
+    request: &CreateTaskPacketResult,
+) -> Result<(), ApiError> {
     if request.workspace_id.is_none() || request.workspace_id != run.workspace_id {
         return Err(ApiError::Forbidden(
             "The result submission does not belong to this packet run's workspace".to_string(),
@@ -463,24 +489,32 @@ async fn submit_packet_run_result(
                 .to_string(),
         ));
     }
-    let packet = TaskPacket::find_by_id(&deployment.db().pool, run.task_packet_id)
+    Ok(())
+}
+
+async fn persist_packet_run_result(
+    pool: &sqlx::SqlitePool,
+    run: &TaskPacketRun,
+    result_document: Value,
+) -> Result<TaskPacketResult, ApiError> {
+    let packet = TaskPacket::find_by_id(pool, run.task_packet_id)
         .await?
         .ok_or(TaskPacketError::NotFound)?;
-    run.set_state(&deployment.db().pool, "validating").await?;
+    run.set_state(pool, "validating").await?;
     let result = packet
         .create_result_for_run(
-            &deployment.db().pool,
+            pool,
             run.id,
             &CreateTaskPacketResult {
                 execution_process_id: run.execution_process_id,
                 workspace_id: run.workspace_id,
-                result: request.result,
+                result: result_document,
             },
         )
         .await?;
     let final_state = result.status.as_str();
-    run.set_state(&deployment.db().pool, final_state).await?;
-    let parent = TaskPacketParentRun::find(&deployment.db().pool, run.parent_run_id)
+    run.set_state(pool, final_state).await?;
+    let parent = TaskPacketParentRun::find(pool, run.parent_run_id)
         .await?
         .ok_or_else(|| ApiError::BadRequest("Task Packet parent run not found".to_string()))?;
     let parent_state = if final_state == "complete" {
@@ -488,18 +522,8 @@ async fn submit_packet_run_result(
     } else {
         final_state
     };
-    parent
-        .set_state(&deployment.db().pool, parent_state, None)
-        .await?;
-    let settings = TaskPacketProjectSettings::find(&deployment.db().pool, parent.remote_project_id)
-        .await
-        .map_err(|error| ApiError::BadRequest(error.to_string()))?;
-    if final_state == "complete"
-        && let Some(settings) = settings
-    {
-        project_issue_status(&deployment, parent.issue_id, settings.review_status_id).await?;
-    }
-    Ok(ResponseJson(ApiResponse::success(result)))
+    parent.set_state(pool, parent_state, None).await?;
+    Ok(result)
 }
 
 pub fn router(_deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
@@ -531,18 +555,50 @@ pub fn router(_deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use api_types::Issue;
-    use db::models::task_packet_run::TaskPacketProjectSettings;
+    use chrono::Utc;
+    use db::models::{
+        task_packet::{CreateTaskPacket, CreateTaskPacketResult, TaskPacket, TaskPacketResult},
+        task_packet_run::{
+            TaskPacketParentRun, TaskPacketProjectSettings, TaskPacketRepositoryMapping,
+            TaskPacketRun, UpsertTaskPacketProjectSettings,
+        },
+    };
     use serde_json::json;
+    use sqlx::{
+        SqlitePool,
+        sqlite::{SqliteConnectOptions, SqliteJournalMode},
+    };
     use task_packet_protocol::validate_task_packet;
+    use tempfile::NamedTempFile;
     use uuid::Uuid;
 
-    use super::{CompileAndDispatchTaskPacket, compile_packet, execution_prompt};
+    use super::{
+        CompileAndDispatchTaskPacket, compile_packet, execution_prompt, persist_packet_run_result,
+        validate_packet_run_result_submission, validate_project_settings,
+    };
 
-    #[test]
-    fn compiles_issue_to_protocol_valid_packet() {
-        let project_id = Uuid::new_v4();
-        let issue: Issue = serde_json::from_value(json!({
+    struct TestDb {
+        _file: NamedTempFile,
+        pool: SqlitePool,
+    }
+
+    async fn test_db() -> TestDb {
+        let file = NamedTempFile::new().unwrap();
+        let database_url = format!("sqlite://{}", file.path().display());
+        let options = SqliteConnectOptions::from_str(&database_url)
+            .unwrap()
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Delete);
+        let pool = SqlitePool::connect_with(options).await.unwrap();
+        sqlx::migrate!("../db/migrations").run(&pool).await.unwrap();
+        TestDb { _file: file, pool }
+    }
+
+    fn sample_issue(project_id: Uuid) -> Issue {
+        serde_json::from_value(json!({
             "id": Uuid::new_v4(), "project_id": project_id, "issue_number": 7,
             "simple_id": "M2E-7", "status_id": Uuid::new_v4(), "title": "Test solar system",
             "description": "Validate the imported solar system asset.", "priority": "high",
@@ -551,8 +607,11 @@ mod tests {
             "creator_user_id": null, "created_at": "2026-08-01T00:00:00Z",
             "updated_at": "2026-08-01T00:00:00Z"
         }))
-        .unwrap();
-        let settings: TaskPacketProjectSettings = serde_json::from_value(json!({
+        .unwrap()
+    }
+
+    fn sample_settings(project_id: Uuid) -> TaskPacketProjectSettings {
+        serde_json::from_value(json!({
             "remote_project_id": project_id, "local_project_id": Uuid::new_v4(), "enabled": true,
             "profile": "mission-to", "executor_config": {"executor": "CODEX"},
             "in_progress_status_id": null, "review_status_id": null,
@@ -563,7 +622,100 @@ mod tests {
             }],
             "created_at": "2026-08-01T00:00:00Z", "updated_at": "2026-08-01T00:00:00Z"
         }))
+        .unwrap()
+    }
+
+    fn sample_settings_request() -> UpsertTaskPacketProjectSettings {
+        UpsertTaskPacketProjectSettings {
+            local_project_id: Some(Uuid::new_v4()),
+            enabled: true,
+            profile: "mission-to".to_string(),
+            executor_config: serde_json::from_value(json!({"executor": "CODEX"})).unwrap(),
+            in_progress_status_id: None,
+            review_status_id: None,
+            repository_mappings: vec![TaskPacketRepositoryMapping {
+                logical_id: "mission-to".to_string(),
+                repo_id: Uuid::new_v4(),
+                role: "primary".to_string(),
+                target_branch: "dev".to_string(),
+                read_paths: vec!["**".to_string()],
+                write_paths: vec!["Source/**".to_string()],
+                forbidden_paths: vec!["Saved/**".to_string()],
+            }],
+        }
+    }
+
+    async fn seeded_run() -> (TestDb, Issue, TaskPacketParentRun, TaskPacketRun, Uuid) {
+        let db = test_db().await;
+        let project_id = Uuid::new_v4();
+        let issue = sample_issue(project_id);
+        let settings = sample_settings(project_id);
+        let parent_run = TaskPacketParentRun::create(&db.pool, issue.id, issue.project_id)
+            .await
+            .unwrap();
+        let packet = TaskPacket::create(
+            &db.pool,
+            &CreateTaskPacket {
+                issue_id: Some(issue.id),
+                workspace_id: None,
+                execution_process_id: None,
+                packet: compile_packet(
+                    &issue,
+                    &settings,
+                    parent_run.revision,
+                    &CompileAndDispatchTaskPacket {
+                        kind: None,
+                        acceptance: None,
+                    },
+                ),
+            },
+        )
+        .await
         .unwrap();
+        let mut run = TaskPacketRun::create(&db.pool, parent_run.id, packet.id)
+            .await
+            .unwrap();
+        let workspace_id = Uuid::new_v4();
+        // These tests exercise route validation and state projection without
+        // constructing an unrelated workspace/execution fixture graph.
+        run.workspace_id = Some(workspace_id);
+        (db, issue, parent_run, run, workspace_id)
+    }
+
+    fn sample_result(
+        packet_id: &str,
+        task_id: &str,
+        run_id: Uuid,
+        status: &str,
+    ) -> serde_json::Value {
+        let mut result: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../task-packet-protocol/fixtures/result-envelope.example.json"
+        ))
+        .unwrap();
+        result["packet_id"] = json!(packet_id);
+        result["task_id"] = json!(task_id);
+        result["status"] = json!(status);
+        result["execution"]["orchestrator"]["adapter_id"] = json!("vibe-kanban");
+        result["execution"]["orchestrator"]["run_id"] = json!(run_id.to_string());
+        result["execution"]["orchestrator"]["host"] = json!("local");
+        result["execution"]["orchestrator"]["workspace_ref"] = json!("workspace");
+        result["execution"]["orchestrator"]["session_ref"] = json!("session");
+        result["execution"]["agent"]["adapter_id"] = json!("vibe-local-agent");
+        result["execution"]["agent"]["agent_name"] = json!("current-agent");
+        result["execution"]["agent"]["model_provider"] = json!("current-provider");
+        result["execution"]["agent"]["model"] = json!("current-model");
+        result["execution"]["agent"]["agent_session_ref"] = json!("current-agent-session");
+        result["execution"]["started_at"] = json!(Utc::now().to_rfc3339());
+        result["execution"]["ended_at"] = json!(Utc::now().to_rfc3339());
+        result["execution"]["metadata"]["transport"] = json!("local-vibe-execution");
+        result
+    }
+
+    #[test]
+    fn compiles_issue_to_protocol_valid_packet() {
+        let project_id = Uuid::new_v4();
+        let issue = sample_issue(project_id);
+        let settings = sample_settings(project_id);
         let packet = compile_packet(
             &issue,
             &settings,
@@ -584,5 +736,93 @@ mod tests {
         let prompt = execution_prompt(run_id, &json!({"packet_id": "packet-1"})).unwrap();
         assert!(prompt.contains("submit_task_packet_result"));
         assert!(prompt.contains(&run_id.to_string()));
+    }
+
+    #[test]
+    fn rejects_invalid_project_configuration() {
+        let mut request = sample_settings_request();
+        request.profile.clear();
+        let error = validate_project_settings(&request).unwrap_err();
+        assert!(matches!(error, crate::error::ApiError::BadRequest(_)));
+
+        let mut request = sample_settings_request();
+        request.repository_mappings[0].role = "invalid".to_string();
+        let error = validate_project_settings(&request).unwrap_err();
+        assert!(matches!(error, crate::error::ApiError::BadRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn valid_result_moves_parent_run_to_review() {
+        let (db, _issue, parent_run, run, workspace_id) = seeded_run().await;
+        let packet = TaskPacket::find_by_id(&db.pool, run.task_packet_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let request = CreateTaskPacketResult {
+            execution_process_id: None,
+            workspace_id: Some(workspace_id),
+            result: sample_result(&packet.packet_id, &packet.task_id, run.id, "complete"),
+        };
+
+        validate_packet_run_result_submission(&run, &request).unwrap();
+        let result = persist_packet_run_result(&db.pool, &run, request.result)
+            .await
+            .unwrap();
+
+        assert_eq!(result.status, "complete");
+        let stored = TaskPacketResult::find_by_packet_run_id(&db.pool, run.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.id, result.id);
+        let refreshed_run = TaskPacketRun::find(&db.pool, run.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(refreshed_run.state, "complete");
+        let refreshed_parent = TaskPacketParentRun::find(&db.pool, parent_run.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(refreshed_parent.state, "review");
+    }
+
+    #[tokio::test]
+    async fn rejects_duplicate_and_mismatched_results() {
+        let (db, _issue, _parent_run, run, workspace_id) = seeded_run().await;
+        let packet = TaskPacket::find_by_id(&db.pool, run.task_packet_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let mismatched_run_request = CreateTaskPacketResult {
+            execution_process_id: None,
+            workspace_id: Some(workspace_id),
+            result: sample_result(
+                &packet.packet_id,
+                &packet.task_id,
+                Uuid::new_v4(),
+                "complete",
+            ),
+        };
+        let error =
+            validate_packet_run_result_submission(&run, &mismatched_run_request).unwrap_err();
+        assert!(matches!(error, crate::error::ApiError::BadRequest(_)));
+
+        let mismatched_packet = sample_result("wrong-packet", &packet.task_id, run.id, "complete");
+        let error = persist_packet_run_result(&db.pool, &run, mismatched_packet)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, crate::error::ApiError::BadRequest(_)));
+
+        let valid_result = sample_result(&packet.packet_id, &packet.task_id, run.id, "complete");
+        persist_packet_run_result(&db.pool, &run, valid_result)
+            .await
+            .unwrap();
+        let duplicate = sample_result(&packet.packet_id, &packet.task_id, run.id, "complete");
+        let error = persist_packet_run_result(&db.pool, &run, duplicate)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, crate::error::ApiError::BadRequest(_)));
     }
 }
